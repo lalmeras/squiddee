@@ -1,0 +1,29 @@
+# proxy https with MITM
+http_port {{ port }} ssl-bump \
+  cert={{ cacert }} \
+  generate-host-certificates=on dynamic_cert_mem_cache_size=4MB
+sslcrtd_program {{ ssl_crtd }} -s {{ here }}/ssl_db -M 4MB
+
+pid_filename {{ here }}/run/squid.pid
+access_log {{ here }}/logs/access.log combined
+cache_log {{ here }}/logs/cache.log
+cache_store_log {{ here }}/logs/store.log
+#debug_options ALL,2
+
+# 5Go cache
+cache_dir aufs {{ here }}/cache {{ cache_dir_cfg }}
+minimum_object_size {{ minimum_object_size }}
+maximum_object_size {{ maximum_object_size }}
+
+# ACLs
+acl lan src all
+acl step1 at_step SslBump1
+
+http_access allow lan
+http_access deny all
+
+# force cache on basic auth / without cache directive
+refresh_pattern . 0 90% 432000 ignore-auth ignore-reload reload-into-ims
+
+ssl_bump peek step1
+ssl_bump bump all
