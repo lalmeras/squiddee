@@ -51,14 +51,19 @@ def main(directory, port, cache_size,
         generate_cacert(directory, subject, cert_path, cert_path)
         cacert = cert_path
     conf_file = os.path.join(directory, 'squid.conf')
+    ssl_crtd_path = None
+    if os.path.exists('/usr/lib64/squid/security_file_certgen'):
+        ssl_crtd_path = '/usr/lib64/squid/security_file_certgen'
+    else:
+        ssl_crtd_path = '/usr/lib64/squid/ssl_crtd'
     generate_configuration(conf_file, directory, port, cache_size,
                            minimum_object_size, maximum_object_size,
-                           cacert)
+                           cacert, ssl_crtd_path)
     squid = plumbum.local['squid']
     if not os.path.exists(os.path.join(directory, 'cache', 'swap.state')):
         squid['-f', conf_file, '-z', '-N'] & plumbum.FG
     if not os.path.exists(os.path.join(directory, 'ssl_db')):
-        ssl_crtd = plumbum.local['/usr/lib64/squid/security_file_certgen']
+        ssl_crtd = plumbum.local[ssl_crtd_path]
         ssl_crtd['-c', '-s', os.path.join(directory, 'ssl_db')] & plumbum.FG
     squid['-f', conf_file, '-N'] & plumbum.FG
     sys.exit(0)
@@ -66,7 +71,7 @@ def main(directory, port, cache_size,
 
 def generate_configuration(conf_file, directory, port, cache_size,
                            minimum_object_size, maximum_object_size,
-                           cacert):
+                           cacert, ssl_crtd_path):
     loader = jinja2.PackageLoader(__package__)
     env = jinja2.Environment(loader=loader)
     if cache_size is None:
@@ -79,7 +84,7 @@ def generate_configuration(conf_file, directory, port, cache_size,
     vars = dict(
         here=directory,
         cacert=cacert,
-        ssl_crtd='/usr/lib64/squid/security_file_certgen',
+        ssl_crtd=ssl_crtd_path,
         cache_dir_cfg=cache_dir_cfg,
         minimum_object_size=minimum_object_size,
         maximum_object_size=maximum_object_size,
