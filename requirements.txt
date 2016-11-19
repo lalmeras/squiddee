@@ -1,0 +1,5 @@
+Click>=6.0
+plumbum>=1.6.2
+jinja2>=2.7
+humanfriendly>=2.0.1
+
