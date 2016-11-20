@@ -1,0 +1,60 @@
+#! /bin/bash
+set -e
+
+usage() {
+	echo "usage: $0 [add|remove]" >&2
+}
+
+if [[ $# -ne 1 ]]; then
+	usage
+	exit 1
+fi
+
+while [[ $# -gt 0 ]]; do
+	key="$1"
+	case $key in
+	add)
+		add=true
+		remove=false
+		shift
+		;;
+	remove)
+		add=false
+		remove=true
+		shift
+		;;
+	--help|-h)
+		usage
+		exit 0
+		;;
+	*)
+		usage
+		exit 1
+		;;
+	esac
+done
+
+
+if [ "$add" == "true" ]; then
+	CA_CERT=$( cat <<'EOF'
+{{ ca_cert }}
+EOF
+)
+	if [ -d /etc/pki/ca-trust/source/anchors ]; then
+		echo "${CA_CERT}" | sudo tee /etc/pki/ca-trust/source/anchors/squiddee.pem
+	elif [ -d /usr/local/share/ca-certificates ]; then
+		echo "${CA_CERT}" | sudo tee /usr/local/share/ca-certificates/squiddee.crt
+	fi
+	(which update-ca-trust && sudo update-ca-trust) || \
+		(which update-ca-certificates && sudo update-ca-certificates)
+fi
+
+if [ "$remove" == "true" ]; then
+	if [ -d /etc/pki/ca-trust/source/anchors ]; then
+		sudo rm -f /etc/pki/ca-trust/source/anchors/squiddee.pem
+	elif [ -d /usr/local/share/ca-certificates ]; then
+		sudo rm -f /usr/local/share/ca-certificates/squiddee.crt
+	fi
+	(which update-ca-trust && sudo update-ca-trust) || \
+		(which update-ca-certificates && sudo update-ca-certificates)
+fi

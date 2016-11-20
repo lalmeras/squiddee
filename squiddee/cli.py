@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import squiddee.cacertserver
+
 import click
 
 import humanfriendly
@@ -10,7 +12,9 @@ import plumbum
 
 import os
 import os.path
+import shutil
 import sys
+import tempfile
 
 
 @click.command()
@@ -30,9 +34,11 @@ import sys
               default='0')
 @click.option('--maximum-object-size', '-m', help='maximum object size',
               default='350 MB')
+@click.option('--serve-certificate/--no-serve-certificate',
+              help='serve ssl certificate', default=True)
 def main(directory, port, cache_size,
          minimum_object_size, maximum_object_size,
-         cacert, cacert_subject):
+         cacert, cacert_subject, serve_certificate):
     if not os.path.exists(directory):
         os.makedirs(directory)
     for path in ('cache', 'logs', 'run', 'certs'):
@@ -50,23 +56,43 @@ def main(directory, port, cache_size,
                       'CN=squiddee.example.org'
         generate_cacert(directory, subject, cert_path, cert_path)
         cacert = cert_path
-    conf_file = os.path.join(directory, 'squid.conf')
-    ssl_crtd_path = None
-    if os.path.exists('/usr/lib64/squid/security_file_certgen'):
-        ssl_crtd_path = '/usr/lib64/squid/security_file_certgen'
-    else:
-        ssl_crtd_path = '/usr/lib64/squid/ssl_crtd'
-    generate_configuration(conf_file, directory, port, cache_size,
-                           minimum_object_size, maximum_object_size,
-                           cacert, ssl_crtd_path)
-    squid = plumbum.local['squid']
-    if not os.path.exists(os.path.join(directory, 'cache', 'swap.state')):
-        squid['-f', conf_file, '-z', '-N'] & plumbum.FG
-    if not os.path.exists(os.path.join(directory, 'ssl_db')):
-        ssl_crtd = plumbum.local[ssl_crtd_path]
-        ssl_crtd['-c', '-s', os.path.join(directory, 'ssl_db')] & plumbum.FG
-    squid['-f', conf_file, '-N'] & plumbum.FG
+    cacert_path = None
+    cacert_dir = None
+    try:
+        if serve_certificate:
+            cacert_dir = tempfile.mkdtemp()
+            cacert_path = os.path.join(cacert_dir, 'squiddee.crt')
+            openssl = plumbum.local['openssl']
+            gen = openssl['x509', '-outform', 'pem', '-in', cert_path,
+                          '-out', cacert_path].run()
+            if gen[0] != 0:
+                raise Exception('error extracting certificate')
+        conf_file = os.path.join(directory, 'squid.conf')
+        ssl_crtd_path = None
+        if os.path.exists('/usr/lib64/squid/security_file_certgen'):
+            ssl_crtd_path = '/usr/lib64/squid/security_file_certgen'
+        else:
+            ssl_crtd_path = '/usr/lib64/squid/ssl_crtd'
+        generate_configuration(conf_file, directory, port, cache_size,
+                               minimum_object_size, maximum_object_size,
+                               cacert, ssl_crtd_path)
+        squid = plumbum.local['squid']
+        if not os.path.exists(os.path.join(directory, 'cache', 'swap.state')):
+            squid['-f', conf_file, '-z', '-N'] & plumbum.FG
+        if not os.path.exists(os.path.join(directory, 'ssl_db')):
+            ssl_crtd = plumbum.local[ssl_crtd_path]
+            ssl_crtd['-c', '-s', os.path.join(directory, 'ssl_db')] & plumbum.FG
+        http_serve_thread = http_serve_cacert(cacert_path, port + 1)
+        squid['-f', conf_file, '-N'] & plumbum.FG
+        http_serve_thread.join()
+    finally:
+        if cacert_dir:
+            shutil.rmtree(cacert_dir)
     sys.exit(0)
+
+
+def http_serve_cacert(cacert_path, listen_port):
+    squiddee.cacertserver.run_cacertserver(cacert_path, listen_port)
 
 
 def generate_configuration(conf_file, directory, port, cache_size,
